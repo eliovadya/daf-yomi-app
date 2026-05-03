@@ -9,4 +9,4 @@
 export const ANTHROPIC_API_KEY = 'YOUR_ANTHROPIC_API_KEY_HERE';
 
 // Model to use for quiz generation — claude-3-5-haiku is fast + cheap for this
-export const ANTHROPIC_MODEL = 'claude-3-5-haiku-20241022';
+export const ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001';
