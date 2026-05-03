@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "דף יומי | Daf Yomi",
+    "slug": "daf-yomi-tracker",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#2C5F8A"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.eliyahu.dafyomi"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#2C5F8A"
+      }
+    }
+  }
+}
