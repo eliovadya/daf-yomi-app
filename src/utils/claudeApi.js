@@ -1,31 +1,55 @@
-// claudeApi.js — generates quiz questions for a given daf using the Anthropic API
+// claudeApi.js — generates quiz questions grounded in the actual daf text
+//
+// Flow:
+//   1. Fetch the English translation of the daf from Sefaria API
+//   2. Pass the text to Claude so questions are based on real content
+//   3. Fall back to knowledge-based questions if Sefaria is unavailable
 
 import { ANTHROPIC_API_KEY, ANTHROPIC_MODEL } from '../config';
 
-/**
- * Generates 5 multiple-choice quiz questions about a specific daf.
- *
- * @param {string} dafRef     - e.g. "Berakhot 2a"   (used in the prompt)
- * @param {string} dafDisplayEn - e.g. "Berakhot 2"  (for the prompt context)
- * @param {'easy'|'medium'|'hard'} difficulty
- *
- * @returns {Promise<Array>}  - Array of question objects (see shape below)
- *
- * Question shape:
- * {
- *   questionEn:     string,
- *   questionHe:     string,
- *   options:        string[],   // ["A. ...", "B. ...", "C. ...", "D. ..."]
- *   optionsHe:      string[],   // ["א. ...", "ב. ...", "ג. ...", "ד. ..."]
- *   answer:         string,     // "A" | "B" | "C" | "D"
- *   explanationEn:  string,
- *   explanationHe:  string,
- * }
- */
+// ---------------------------------------------------------------------------
+// Step 1 — fetch daf text from Sefaria
+// ---------------------------------------------------------------------------
+
+async function fetchDafText(dafRef) {
+  try {
+    // "Chullin 3a" → "Chullin.3a"
+    const sefariaRef = dafRef.trim().replace(/ /g, '.');
+    const url = `https://www.sefaria.org/api/texts/${encodeURIComponent(sefariaRef)}?lang=en&context=0`;
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const data = await res.json();
+
+    const flat = flattenTextArray(data.text ?? '');
+    const clean = flat.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    // Cap at ~3500 chars to keep the prompt reasonable in size
+    return clean.length > 0 ? clean.slice(0, 3500) : null;
+
+  } catch (err) {
+    console.warn('[claudeApi] Sefaria text fetch failed:', err.message);
+    return null;
+  }
+}
+
+function flattenTextArray(val) {
+  if (typeof val === 'string') return val;
+  if (Array.isArray(val)) return val.flat(Infinity).filter(x => typeof x === 'string').join(' ');
+  return '';
+}
+
+// ---------------------------------------------------------------------------
+// Step 2 — generate quiz with Claude
+// ---------------------------------------------------------------------------
+
 export async function generateQuizQuestions(dafRef, dafDisplayEn, difficulty) {
   if (!ANTHROPIC_API_KEY || ANTHROPIC_API_KEY === 'YOUR_ANTHROPIC_API_KEY_HERE') {
     throw new Error('API_KEY_MISSING');
   }
+
+  const dafText = await fetchDafText(dafRef);
 
   const difficultyGuide = {
     easy:   'basic recall: who said what, key stories, and famous phrases',
@@ -33,7 +57,11 @@ export async function generateQuizQuestions(dafRef, dafDisplayEn, difficulty) {
     hard:   'deep analysis: comparing opinions, underlying logic, and practical implications',
   }[difficulty];
 
-  const prompt = `You are an expert Talmud teacher creating a quiz for a student who just finished studying ${dafRef} (${dafDisplayEn}).
+  const textSection = dafText
+    ? `\n\nHere is the actual English translation of ${dafRef}:\n"""\n${dafText}\n"""\n\nCRITICAL: Every one of the 5 questions MUST be based on the specific content of the text above. Do not ask about things not mentioned in this text.`
+    : `\n\n(The daf text could not be retrieved. Use your knowledge of ${dafRef} as carefully as possible.)`;
+
+  const prompt = `You are an expert Talmud teacher creating a quiz for a student who just finished studying ${dafRef} (${dafDisplayEn}).${textSection}
 
 Create exactly 5 multiple-choice questions at difficulty level: ${difficulty.toUpperCase()}.
 Focus on: ${difficultyGuide}.
@@ -56,10 +84,8 @@ JSON structure:
 }
 
 Rules:
-- All 5 questions must have exactly 4 options (A/B/C/D  ×  א/ב/ג/ד)
+- All 5 questions must have exactly 4 options (A/B/C/D x alef/bet/gimel/dalet)
 - The "answer" field is a single letter: A, B, C, or D
-- Questions must relate to the actual content of ${dafRef}
-- If unsure about a very specific detail, ask about the broader topic/tractate
 - Hebrew text should be natural Israeli Hebrew, not transliteration`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -85,7 +111,6 @@ Rules:
   const data = await response.json();
   const rawText = data.content?.[0]?.text ?? '';
 
-  // Strip accidental markdown fences if the model adds them
   const cleaned = rawText.replace(/^```[a-z]*\n?/i, '').replace(/```$/m, '').trim();
 
   try {
